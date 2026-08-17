@@ -1,0 +1,71 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yasmin-ai-studio",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ---------------------------------------------------------------------
+  // D1 — banco de dados estruturado (metadados, jobs, biblioteca, etc.)
+  // Crie o banco com: wrangler d1 create yasmin-db
+  // Depois cole o database_id retornado abaixo.
+  // ---------------------------------------------------------------------
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yasmin-db",
+      "database_id": "COLE_AQUI_O_DATABASE_ID_RETORNADO_PELO_WRANGLER"
+    }
+  ],
+
+  // ---------------------------------------------------------------------
+  // R2 — armazenamento de imagens (referências e gerações)
+  // Crie o bucket com: wrangler r2 bucket create yasmin-assets
+  // ---------------------------------------------------------------------
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "yasmin-assets"
+    }
+  ],
+
+  // ---------------------------------------------------------------------
+  // KV — cache/configurações leves (opcional, usado para rate limiting)
+  // Crie o namespace com: wrangler kv namespace create yasmin-cache
+  // ---------------------------------------------------------------------
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "COLE_AQUI_O_ID_RETORNADO_PELO_WRANGLER"
+    }
+  ],
+
+  // ---------------------------------------------------------------------
+  // Workers AI — usado pelo CloudflareProvider (não precisa de API key própria)
+  // ---------------------------------------------------------------------
+  "ai": {
+    "binding": "AI"
+  },
+
+  "vars": {
+    "ENVIRONMENT": "production",
+    "FREE_FIRST_MODE": "true",
+    "TEXT_AI_MODEL": "@cf/meta/llama-3.2-3b-instruct"
+  },
+
+  // Executa as automações a cada 15 minutos.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  }
+
+  // ---------------------------------------------------------------------
+  // Secrets (NÃO vão aqui — configure via CLI, nunca commitados):
+  //   wrangler secret put OPENAI_API_KEY
+  //   wrangler secret put GOOGLE_API_KEY
+  //   wrangler secret put REPLICATE_API_TOKEN
+  //   wrangler secret put FAL_API_KEY
+  //   wrangler secret put STABILITY_API_KEY
+  //   wrangler secret put ADMIN_PASSWORD_HASH
+  //   wrangler secret put JWT_SECRET
+  // ---------------------------------------------------------------------
+}
