@@ -5,6 +5,11 @@
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Frontend estático servido pelo mesmo Worker.
+  "assets": {
+    "directory": "./public"
+  },
+
   // ---------------------------------------------------------------------
   // D1 — banco de dados estruturado (metadados, jobs, biblioteca, etc.)
   // Crie o banco com: wrangler d1 create yasmin-db

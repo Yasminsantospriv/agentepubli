@@ -34,7 +34,7 @@ settingsRoute.put("/:key", async (c) => {
 // GET /health — System Health card do dashboard
 settingsRoute.get("/health", async (c) => {
   const checks: Record<string, string> = {
-    frontend: "NOT_CONFIGURED", // este repositório ainda não inclui o painel visual
+    frontend: "ONLINE", // painel estático incluído em ./public e servido por Workers Static Assets
     api: "ONLINE",
     database: "OFFLINE",
     storage: "OFFLINE",

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#090b10" />
+  <meta name="description" content="Yasmin AI — Content & Automation Studio" />
+  <title>Yasmin AI Studio</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="loginScreen" class="login-shell">
+    <section class="login-card">
+      <div class="brand-mark brand-mark-lg">Y</div>
+      <p class="eyebrow">YASMIN AI</p>
+      <h1>Content & Automation Studio</h1>
+      <p class="muted">Entre para acessar o painel privado.</p>
+      <form id="loginForm" class="stack gap-md" autocomplete="on">
+        <label class="field">
+          <span>Senha administrativa</span>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="Digite sua senha" />
+        </label>
+        <button class="btn btn-primary btn-lg" type="submit">Entrar</button>
+      </form>
+      <div id="loginMessage" class="form-message" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand-mark">Y</div>
+        <div>
+          <strong>Yasmin AI</strong>
+          <span>Studio</span>
+        </div>
+      </div>
+
+      <nav id="nav" class="nav" aria-label="Navegação principal">
+        <button data-view="dashboard" class="nav-item active"><span>⌂</span>Dashboard</button>
+        <button data-view="create" class="nav-item"><span>✦</span>Create</button>
+        <button data-view="library" class="nav-item"><span>▦</span>Library</button>
+        <button data-view="references" class="nav-item"><span>◈</span>References</button>
+        <button data-view="trends" class="nav-item"><span>↗</span>Trends</button>
+        <button data-view="planner" class="nav-item"><span>□</span>Planner</button>
+        <button data-view="automations" class="nav-item"><span>⚡</span>Automations</button>
+        <button data-view="agent" class="nav-item"><span>✧</span>AI Agent</button>
+        <button data-view="settings" class="nav-item"><span>⚙</span>Settings</button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="status-line"><span id="sidebarStatusDot" class="status-dot"></span><span id="sidebarStatus">Verificando sistema…</span></div>
+        <button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button>
+      </div>
+    </aside>
+
+    <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="menuBtn" class="icon-btn mobile-only" aria-label="Abrir menu">☰</button>
+          <div>
+            <p id="pageEyebrow" class="eyebrow">YASMIN AI STUDIO</p>
+            <h2 id="pageTitle">Dashboard</h2>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="model-pill"><span class="status-dot online"></span>Yasmin · Identity Lock</span>
+          <button id="refreshBtn" class="icon-btn" title="Atualizar">↻</button>
+        </div>
+      </header>
+
+      <section id="viewRoot" class="view-root" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+
+  <dialog id="dialog" class="dialog">
+    <div class="dialog-head">
+      <h3 id="dialogTitle">Detalhes</h3>
+      <button id="dialogClose" class="icon-btn" aria-label="Fechar">×</button>
+    </div>
+    <div id="dialogBody" class="dialog-body"></div>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
