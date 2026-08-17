@@ -1,0 +1,22 @@
+{
+  "name": "yasmin-trend-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm run types && tsc --noEmit && vitest run && wrangler deploy --dry-run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply yasmin-trend-db --local",
+    "migrate:remote": "wrangler d1 migrations apply yasmin-trend-db --remote",
+    "test": "vitest run",
+    "types": "wrangler types --env-interface GeneratedBindings --no-include-runtime"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.21.3",
+    "@cloudflare/workers-types": "5.20260817.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.123.0"
+  }
+}
