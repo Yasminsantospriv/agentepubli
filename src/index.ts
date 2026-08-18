@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { AppEnv, Bindings } from "./types";
 import { fail } from "./lib/response";
 import { requireAuth } from "./lib/auth";
+import { getSetting } from "./lib/app-settings";
 import { runAutomationRules } from "./services/automation-runner";
 
 import { authRoute } from "./routes/auth";
@@ -24,11 +25,25 @@ app.use("*", cors({
   allowHeaders: ["Content-Type", "Authorization"],
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 }));
+
+app.use("*", async (c, next) => {
+  try {
+    const [freeFirst, textModel] = await Promise.all([
+      getSetting<boolean | null>(c.env.DB, "free_first_mode", null),
+      getSetting<string | null>(c.env.DB, "text_ai_model", null),
+    ]);
+    if (freeFirst !== null) c.env.FREE_FIRST_MODE = String(freeFirst);
+    if (textModel) c.env.TEXT_AI_MODEL = textModel;
+  } catch {
+    // Se o D1 estiver indisponível, mantém os valores definidos no Wrangler.
+  }
+  await next();
+});
+
 app.use("*", requireAuth);
 
 app.route("/auth", authRoute);
 
-// --- Rotas de negócio ---
 app.route("/models", modelsRoute);
 app.route("/models", referencesRoute);
 app.route("/models", generationRoute);
