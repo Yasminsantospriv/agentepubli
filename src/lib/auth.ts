@@ -4,6 +4,7 @@ import { fail } from "./response";
 
 const TOKEN_TTL_SECONDS = 12 * 60 * 60;
 const PBKDF2_ITERATIONS_MIN = 100_000;
+const PBKDF2_ITERATIONS = 100_000;
 
 export type AuthUser = {
   sub: string;
@@ -15,12 +16,11 @@ export type AuthUser = {
 export async function verifyPassword(password: string, stored: string | undefined): Promise<boolean> {
   if (!stored) return false;
 
-  // Formato: pbkdf2$<iterations>$<salt-base64url>$<hash-base64url>
   const [kind, iterationText, saltText, hashText] = stored.split("$");
   if (kind !== "pbkdf2" || !iterationText || !saltText || !hashText) return false;
 
   const iterations = Number(iterationText);
-  if (!Number.isInteger(iterations) || iterations < PBKDF2_ITERATIONS_MIN) return false;
+  if (!Number.isInteger(iterations) || iterations < PBKDF2_ITERATIONS_MIN || iterations > 100_000) return false;
 
   const salt = base64UrlDecode(saltText);
   const expected = new Uint8Array(base64UrlDecode(hashText));
@@ -37,6 +37,23 @@ export async function verifyPassword(password: string, stored: string | undefine
     expected.byteLength * 8
   );
   return timingSafeEqual(new Uint8Array(bits), expected);
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PBKDF2_ITERATIONS },
+    keyMaterial,
+    256
+  );
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${base64UrlEncode(salt)}$${base64UrlEncode(bits)}`;
 }
 
 export async function signAdminToken(secret: string, ttlSeconds = TOKEN_TTL_SECONDS): Promise<string> {
@@ -73,7 +90,7 @@ export async function requireAuth(c: Context<AppEnv>, next: Next) {
   const publicPaths = new Set(["/", "/health", "/auth/login"]);
   if (publicPaths.has(path)) return next();
 
-  if (!c.env.JWT_SECRET || !c.env.ADMIN_PASSWORD_HASH) {
+  if (!c.env.JWT_SECRET) {
     return fail("Autenticação administrativa ainda não foi configurada.", 503);
   }
 
