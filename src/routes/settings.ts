@@ -6,15 +6,18 @@ import { buildProviderRegistry } from "../providers/registry";
 
 export const settingsRoute = new Hono<AppEnv>();
 
-// GET /settings — todas as configurações chave/valor
-settingsRoute.get("/", async (c) => {
-  const rows = await dbAll<{ key: string; value: string }>(c.env.DB, "SELECT * FROM settings");
+settingsRoute.get("/settings", async (c) => {
+  const rows = await dbAll<{ key: string; value: string }>(
+    c.env.DB,
+    "SELECT * FROM settings WHERE key <> 'admin_password_hash' ORDER BY key"
+  );
   return ok(rows);
 });
 
-// PUT /settings/:key — cria ou atualiza uma configuração
-settingsRoute.put("/:key", async (c) => {
+settingsRoute.put("/settings/:key", async (c) => {
   const key = c.req.param("key");
+  if (key === "admin_password_hash") return fail("Configuração protegida.", 403);
+
   const body = await c.req.json<{ value: unknown }>();
   if (body.value === undefined) return fail("value é obrigatório");
 
@@ -31,10 +34,9 @@ settingsRoute.put("/:key", async (c) => {
   return ok(row);
 });
 
-// GET /health — System Health card do dashboard
 settingsRoute.get("/health", async (c) => {
   const checks: Record<string, string> = {
-    frontend: "ONLINE", // painel estático incluído em ./public e servido por Workers Static Assets
+    frontend: "ONLINE",
     api: "ONLINE",
     database: "OFFLINE",
     storage: "OFFLINE",
@@ -52,7 +54,6 @@ settingsRoute.get("/health", async (c) => {
     await c.env.ASSETS_BUCKET.head("__healthcheck__");
     checks.storage = "ONLINE";
   } catch {
-    // head em objeto inexistente ainda confirma que o binding responde
     checks.storage = "ONLINE";
   }
 
@@ -62,7 +63,6 @@ settingsRoute.get("/health", async (c) => {
   return ok(checks);
 });
 
-// GET /dashboard — cards agregados da página inicial
 settingsRoute.get("/dashboard", async (c) => {
   const [referencesCount, todayContent, readyContent, opportunitiesCount, automationsCount] = await Promise.all([
     dbFirst<{ count: number }>(c.env.DB, "SELECT COUNT(*) as count FROM model_references WHERE active = 1"),
