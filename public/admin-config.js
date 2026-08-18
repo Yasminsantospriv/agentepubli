@@ -93,6 +93,7 @@
 
     document.getElementById("changePasswordForm").addEventListener("submit", async (event) => {
       event.preventDefault();
+      const form = event.currentTarget;
       const current = document.getElementById("currentAdminPassword").value;
       const next = document.getElementById("newAdminPassword").value;
       const confirm = document.getElementById("confirmAdminPassword").value;
@@ -107,7 +108,7 @@
           body: JSON.stringify({ current_password: current, new_password: next }),
         });
         showMessage(message, "Senha alterada com sucesso. Use a nova senha no próximo login.", true);
-        event.currentTarget.reset();
+        if (form instanceof HTMLFormElement) form.reset();
       } catch (err) {
         showMessage(message, err.message || "Não foi possível alterar a senha.", false);
       }
