@@ -5,6 +5,7 @@ import { fail } from "./lib/response";
 import { requireAuth } from "./lib/auth";
 import { getSetting } from "./lib/app-settings";
 import { runAutomationRules } from "./services/automation-runner";
+import { runTrendScanner } from "./services/trend-scanner";
 
 import { authRoute } from "./routes/auth";
 import { modelsRoute } from "./routes/models";
@@ -43,12 +44,10 @@ app.use("*", async (c, next) => {
 app.use("*", requireAuth);
 
 app.route("/auth", authRoute);
-
 app.route("/models", modelsRoute);
 app.route("/models", referencesRoute);
 app.route("/models", generationRoute);
 app.route("/models", socialRoute);
-
 app.route("/", trendsRoute);
 app.route("/providers", providersRoute);
 app.route("/", libraryRoute);
@@ -57,7 +56,6 @@ app.route("/", settingsRoute);
 app.route("/assets", assetsRoute);
 
 app.get("/", (c) => c.json({ name: "Yasmin AI Studio API", status: "online" }));
-
 app.notFound(() => fail("Rota não encontrada", 404));
 
 app.onError((err) => {
@@ -70,10 +68,11 @@ export default {
     return app.fetch(request, env, ctx);
   },
   async scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
-    ctx.waitUntil(
-      runAutomationRules(env).then((result) => {
-        console.log("Automation cron completed", result);
-      })
-    );
+    ctx.waitUntil((async () => {
+      const trendResult = await runTrendScanner(env).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+      console.log("Trend scanner completed", trendResult);
+      const automationResult = await runAutomationRules(env);
+      console.log("Automation cron completed", automationResult);
+    })());
   },
 };
