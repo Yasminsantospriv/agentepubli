@@ -7,8 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "db:migrate:local": "wrangler d1 execute yasmin-db --local --file=./src/db/schema.sql",
-    "db:migrate:remote": "wrangler d1 execute yasmin-db --remote --file=./src/db/schema.sql",
+    "db:migrate:local": "wrangler d1 execute yasmin-ai-studio-db --local --file=./src/db/schema.sql",
+    "db:migrate:remote": "wrangler d1 execute yasmin-ai-studio-db --remote --file=./src/db/schema.sql",
     "tail": "wrangler tail",
     "dev:scheduled": "wrangler dev --test-scheduled",
     "hash:password": "node ./scripts/hash-password.mjs"
