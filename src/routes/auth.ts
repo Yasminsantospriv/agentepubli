@@ -7,10 +7,6 @@ import { getSetting, setSetting } from "../lib/app-settings";
 
 export const authRoute = new Hono<AppEnv>();
 
-async function getEffectivePasswordHash(c: Parameters<typeof authRoute.post>[1] extends never ? never : any) {
-  return getSetting<string | null>(c.env.DB, "admin_password_hash", null).then((saved) => saved || c.env.ADMIN_PASSWORD_HASH || null);
-}
-
 authRoute.post("/login", async (c) => {
   if (!c.env.JWT_SECRET) {
     return fail("Login ainda não configurado. Defina JWT_SECRET.", 503);
