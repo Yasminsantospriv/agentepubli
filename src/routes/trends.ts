@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types";
 import { dbAll, dbFirst, dbRun } from "../lib/db";
 import { ok, created, fail, notFound, newId, nowIso } from "../lib/response";
+import { getTrendScannerStatus, runTrendScanner } from "../services/trend-scanner";
 
 export const trendsRoute = new Hono<AppEnv>();
 
@@ -27,7 +28,18 @@ trendsRoute.get("/trends", async (c) => {
   return ok(rows);
 });
 
-// POST /trends — registra uma tendência (via integração externa futura ou manualmente)
+// GET /trends/scanner — estado do scanner automático
+trendsRoute.get("/trends/scanner", async (c) => {
+  return ok(await getTrendScannerStatus(c.env));
+});
+
+// POST /trends/scan — força uma busca imediata
+trendsRoute.post("/trends/scan", async (c) => {
+  const result = await runTrendScanner(c.env, { force: true });
+  return ok(result);
+});
+
+// POST /trends — registra uma tendência manualmente
 trendsRoute.post("/trends", async (c) => {
   const body = await c.req.json<{
     platform: string;
@@ -67,7 +79,7 @@ trendsRoute.get("/models/:slug/opportunities", async (c) => {
 
   const rows = await dbAll(
     c.env.DB,
-    `SELECT co.*, st.title AS trend_title, st.platform, st.score
+    `SELECT co.*, st.title AS trend_title, st.platform, st.score, st.source, st.category
      FROM content_opportunities co JOIN social_trends st ON st.id = co.trend_id
      WHERE co.model_id = ? ORDER BY co.compatibility_score DESC, co.created_at DESC LIMIT 50`,
     model.id
@@ -76,7 +88,6 @@ trendsRoute.get("/models/:slug/opportunities", async (c) => {
 });
 
 // POST /models/:slug/opportunities — cria manualmente uma oportunidade a partir de uma tendência
-// (a versão automática seria disparada por uma automation_rule quando score > threshold)
 trendsRoute.post("/models/:slug/opportunities", async (c) => {
   const slug = c.req.param("slug");
   const model = await dbFirst<{ id: string }>(c.env.DB, "SELECT id FROM models WHERE slug = ?", slug);
@@ -90,6 +101,14 @@ trendsRoute.post("/models/:slug/opportunities", async (c) => {
 
   const trend = await dbFirst<{ id: string }>(c.env.DB, "SELECT id FROM social_trends WHERE id = ?", body.trend_id);
   if (!trend) return notFound("Tendência");
+
+  const existing = await dbFirst<{ id: string }>(
+    c.env.DB,
+    "SELECT id FROM content_opportunities WHERE trend_id = ? AND model_id = ? LIMIT 1",
+    body.trend_id,
+    model.id
+  );
+  if (existing) return ok(existing);
 
   const id = newId();
   await dbRun(
