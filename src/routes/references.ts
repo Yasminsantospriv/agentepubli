@@ -69,6 +69,21 @@ referencesRoute.post("/:slug/references", async (c) => {
   return created(await dbFirst(c.env.DB, "SELECT * FROM model_references WHERE id = ?", id));
 });
 
+// Recebe a versão reduzida pelo navegador (máx. 448 px) para uso no FLUX.2.
+referencesRoute.post("/references/:id/ai-ready", async (c) => {
+  const id = c.req.param("id");
+  const existing = await dbFirst<{ id: string }>(c.env.DB, "SELECT id FROM model_references WHERE id = ?", id);
+  if (!existing) return notFound("Referência");
+  const form = await c.req.formData();
+  const file = form.get("file");
+  if (!(file instanceof File)) return fail("Campo file é obrigatório");
+  if (!file.type.startsWith("image/")) return fail("Arquivo AI-ready precisa ser imagem");
+  if (file.size > 2_000_000) return fail("Imagem AI-ready acima de 2 MB");
+  const key = `ai-ready/references/${id}.jpg`;
+  await c.env.ASSETS_BUCKET.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: "image/jpeg" } });
+  return ok({ key, ready: true });
+});
+
 referencesRoute.patch("/references/:id", async (c) => {
   const id = c.req.param("id");
   const existing = await dbFirst<{ id: string; model_id: string }>(c.env.DB, "SELECT id, model_id FROM model_references WHERE id = ?", id);
@@ -104,7 +119,10 @@ referencesRoute.delete("/references/:id", async (c) => {
   const id = c.req.param("id");
   const existing = await dbFirst<{ id: string; model_id: string; storage_key: string }>(c.env.DB, "SELECT id, model_id, storage_key FROM model_references WHERE id = ?", id);
   if (!existing) return notFound("Referência");
-  await c.env.ASSETS_BUCKET.delete(existing.storage_key);
+  await Promise.all([
+    c.env.ASSETS_BUCKET.delete(existing.storage_key),
+    c.env.ASSETS_BUCKET.delete(`ai-ready/references/${id}.jpg`),
+  ]);
   await dbRun(c.env.DB, "DELETE FROM model_references WHERE id = ?", id);
   await logActivity(c.env.DB, existing.model_id, "REFERENCE_DELETE", `Referência ${id} removida`);
   return ok({ deleted: true });

@@ -9,8 +9,6 @@
     "directory": "./public"
   },
 
-  // Cloudflare automatic provisioning:
-  // D1, R2 e KV serão criados/vinculados automaticamente no primeiro deploy.
   "d1_databases": [
     {
       "binding": "DB"
@@ -36,17 +34,21 @@
   "vars": {
     "ENVIRONMENT": "production",
     "FREE_FIRST_MODE": "true",
-    "TEXT_AI_MODEL": "@cf/meta/llama-3.2-3b-instruct"
+    "TEXT_AI_MODEL": "@cf/meta/llama-3.2-3b-instruct",
+    "IMAGE_AI_MODEL": "@cf/black-forest-labs/flux-2-klein-4b",
+    "META_GRAPH_VERSION": "v25.0"
   },
 
   "triggers": {
     "crons": ["*/15 * * * *"]
   }
 
-  // Secrets continuam fora deste arquivo e devem ser configurados no Cloudflare:
+  // Secrets no painel Cloudflare → Configurações → Variáveis e segredos:
   // ADMIN_PASSWORD_HASH
   // JWT_SECRET
-  // OPENAI_API_KEY (opcional)
+  // META_ACCESS_TOKEN
+  // META_IG_USER_ID
+  // OPENAI_API_KEY (opcional; não é necessário no modo gratuito)
   // GOOGLE_API_KEY (opcional)
   // REPLICATE_API_TOKEN (opcional)
   // FAL_API_KEY (opcional)

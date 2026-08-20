@@ -1,9 +1,12 @@
 // ============================================================================
 // Interface comum de providers de geração de imagem
-//
-// Qualquer novo provider (Replicate, FAL, Stability, um serviço próprio, etc.)
-// deve implementar esta interface e ser registrado em registry.ts.
 // ============================================================================
+
+export type ReferenceImageInput = {
+  data: ArrayBuffer;
+  contentType: string;
+  role?: "inspiration" | "identity" | "body" | "hair" | "other";
+};
 
 export type GenerateImageOptions = {
   prompt: string;
@@ -12,6 +15,7 @@ export type GenerateImageOptions = {
   height?: number;
   quantity?: number;
   model?: string;
+  referenceImages?: ReferenceImageInput[];
   extra?: Record<string, unknown>;
 };
 
@@ -48,14 +52,9 @@ export interface ImageProvider {
   readonly name: string;
 
   isConfigured(): boolean;
-
   generateImage(options: GenerateImageOptions): Promise<GenerateImageResult>;
-
-  /** Retorna UNSUPPORTED_FEATURE se o provider não suportar edição de imagem. */
   editImage(options: EditImageOptions): Promise<GenerateImageResult | typeof UNSUPPORTED_FEATURE>;
-
   getModels(): Promise<string[]>;
-
   testConnection(): Promise<TestConnectionResult>;
 }
 

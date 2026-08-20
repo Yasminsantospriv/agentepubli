@@ -10,10 +10,9 @@ import { CloudflareProvider } from "./cloudflare";
 import { OpenAIProvider } from "./openai";
 import { StubProvider } from "./stub";
 
-/** Monta todos os providers conhecidos pelo sistema, configurados ou não. */
 export function buildProviderRegistry(env: Bindings): ImageProvider[] {
   return [
-    new CloudflareProvider(env.AI),
+    new CloudflareProvider(env.AI, env.IMAGE_AI_MODEL),
     new OpenAIProvider(env.OPENAI_API_KEY),
     new StubProvider("gemini", "Google Gemini", "GOOGLE_API_KEY não configurada"),
     new StubProvider("replicate", "Replicate", "REPLICATE_API_TOKEN não configurada"),
@@ -32,10 +31,6 @@ export function listConfiguredProviders(env: Bindings): ImageProvider[] {
 
 export type GenerationAttempt = { provider: string; error: string };
 
-/**
- * FALLBACK MODE: tenta gerar na ordem de prioridade fornecida.
- * Se um provider falhar, tenta o próximo. Registra todas as tentativas.
- */
 export async function generateWithFallback(
   providers: ImageProvider[],
   options: GenerateImageOptions
@@ -61,19 +56,12 @@ export async function generateWithFallback(
   throw new AllProvidersFailedError(attempts);
 }
 
-/**
- * AUTOMATIC MODE: escolhe o(s) provider(s) configurado(s) por prioridade
- * (menor "priority" numérico = maior prioridade), respeitando FREE_FIRST_MODE
- * quando aplicável (Cloudflare AI primeiro, por não ter custo de API externa).
- */
 export function orderProvidersAutomatic(
   providers: ImageProvider[],
   freeFirst: boolean
 ): ImageProvider[] {
   const configured = providers.filter((p) => p.isConfigured());
   if (!freeFirst) return configured;
-
-  // Cloudflare AI (binding nativo) primeiro no modo free-first
   return [...configured].sort((a, b) => {
     if (a.slug === "cloudflare") return -1;
     if (b.slug === "cloudflare") return 1;

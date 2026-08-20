@@ -5,8 +5,9 @@ import { ok, created, fail, notFound, newId, nowIso } from "../lib/response";
 import { buildGeneratedKey, uploadToR2 } from "../lib/storage";
 import { buildFinalPrompt, type ModelIdentityRow } from "../lib/prompt-engine";
 import { buildProviderRegistry, orderProvidersAutomatic, generateWithFallback, getProvider } from "../providers/registry";
-import type { GenerateImageResult } from "../providers/types";
+import type { GenerateImageResult, ReferenceImageInput } from "../providers/types";
 import { rateLimit } from "../lib/rate-limit";
+import { loadInspirationReference } from "../services/instagram-inspiration";
 
 export const generationRoute = new Hono<AppEnv>();
 
@@ -17,10 +18,19 @@ type GenerateRequestBody = {
   identity_lock?: IdentityLock;
   clothing_description?: string;
   scene_description?: string;
-  provider_slug?: string; // MANUAL mode — se omitido, usa AUTOMATIC + fallback
+  provider_slug?: string;
+  inspiration_id?: string;
 };
 
-// POST /models/:slug/generate — dispara uma geração de imagem
+type ReferenceRow = {
+  id: string;
+  reference_type: string;
+  priority: number;
+  is_master_face: number;
+  is_master_body: number;
+  is_master_full: number;
+};
+
 generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit: 8, windowSeconds: 60 }), async (c) => {
   const slug = c.req.param("slug");
   const model = await dbFirst<{ id: string }>(c.env.DB, "SELECT id FROM models WHERE slug = ?", slug);
@@ -29,14 +39,9 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
   const body = await c.req.json<GenerateRequestBody>();
   if (!body.user_request) return fail("user_request é obrigatório");
 
-  const identity = await dbFirst<ModelIdentityRow>(
-    c.env.DB,
-    "SELECT * FROM model_identity WHERE model_id = ?",
-    model.id
-  );
-
-  const identityLock = body.identity_lock ?? "NORMAL";
-  const { prompt, negativePrompt } = buildFinalPrompt({
+  const identity = await dbFirst<ModelIdentityRow>(c.env.DB, "SELECT * FROM model_identity WHERE model_id = ?", model.id);
+  const identityLock = body.identity_lock ?? "STRONG";
+  const basePrompt = buildFinalPrompt({
     identity,
     userRequest: body.user_request,
     clothingDescription: body.clothing_description,
@@ -45,19 +50,59 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
     format: body.format ?? "1:1",
   });
 
-  // Busca referências relevantes (para registrar quais foram "usadas" nesta geração)
-  const references = await dbAll<{ id: string; reference_type: string }>(
+  const references = await dbAll<ReferenceRow>(
     c.env.DB,
-    `SELECT id, reference_type FROM model_references
+    `SELECT id, reference_type, priority, is_master_face, is_master_body, is_master_full
+     FROM model_references
      WHERE model_id = ? AND active = 1
-       AND (is_master_face = 1 OR is_master_body = 1 OR is_master_full = 1 OR reference_type = 'MASTER')
-     ORDER BY priority DESC LIMIT 5`,
+     ORDER BY is_master_face DESC, is_master_body DESC, is_master_full DESC, priority DESC, created_at DESC
+     LIMIT 12`,
     model.id
   );
 
+  const referenceImages: ReferenceImageInput[] = [];
+  const referenceSnapshot: Array<Record<string, unknown>> = [];
+  let hasPostInspiration = false;
+
+  if (body.inspiration_id) {
+    const inspiration = await loadInspirationReference(c.env, body.inspiration_id).catch(() => null);
+    if (inspiration) {
+      referenceImages.push({ data: inspiration.data, contentType: inspiration.contentType, role: "inspiration" });
+      referenceSnapshot.push({ inspiration_id: body.inspiration_id, type: "INSTAGRAM_INSPIRATION" });
+      hasPostInspiration = true;
+    }
+  }
+
+  const identitySlots = Math.max(0, 4 - referenceImages.length);
+  for (const ref of references) {
+    if (referenceImages.length >= 4 || referenceSnapshot.filter((x) => x.type === "IDENTITY_REFERENCE").length >= identitySlots) break;
+    const object = await c.env.ASSETS_BUCKET.get(`ai-ready/references/${ref.id}.jpg`);
+    if (!object) continue;
+    referenceImages.push({
+      data: await object.arrayBuffer(),
+      contentType: object.httpMetadata?.contentType || "image/jpeg",
+      role: ref.reference_type === "BODY" ? "body" : ref.reference_type === "HAIR" ? "hair" : "identity",
+    });
+    referenceSnapshot.push({
+      id: ref.id,
+      type: "IDENTITY_REFERENCE",
+      reference_type: ref.reference_type,
+      master_face: !!ref.is_master_face,
+      master_body: !!ref.is_master_body,
+      master_full: !!ref.is_master_full,
+    });
+  }
+
+  let finalPrompt = basePrompt.prompt;
+  if (referenceImages.length) {
+    const referenceInstruction = hasPostInspiration
+      ? "A imagem de referência 0 é apenas inspiração de postagem: use composição, enquadramento, pose geral, iluminação, atmosfera e estilo de roupa, sem copiar rosto, identidade, texto, marcas ou detalhes exclusivos. As demais imagens de referência definem a identidade visual da Yasmin e têm prioridade absoluta para rosto, corpo e cabelo."
+      : "As imagens de referência fornecidas definem a identidade visual da Yasmin. Preserve rosto, proporções, cabelo e características consistentes com elas.";
+    finalPrompt = `${referenceInstruction}\n\n${basePrompt.prompt}`;
+  }
+
   const jobId = newId();
   const now = nowIso();
-
   await dbRun(
     c.env.DB,
     `INSERT INTO generation_jobs (
@@ -67,12 +112,12 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
     jobId,
     model.id,
     body.user_request,
-    prompt,
-    negativePrompt,
+    finalPrompt,
+    basePrompt.negativePrompt,
     body.format ?? "1:1",
     body.quantity ?? 1,
     identityLock,
-    JSON.stringify(references),
+    JSON.stringify(referenceSnapshot),
     now
   );
 
@@ -80,35 +125,32 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
 
   const registry = buildProviderRegistry(c.env);
   const freeFirst = c.env.FREE_FIRST_MODE === "true";
-
   const orderedProviders = body.provider_slug
     ? [getProvider(c.env, body.provider_slug)].filter((p): p is NonNullable<typeof p> => !!p)
     : orderProvidersAutomatic(registry, freeFirst);
 
   if (orderedProviders.length === 0) {
-    await dbRun(
-      c.env.DB,
-      `UPDATE generation_jobs SET status = 'FAILED', error = ?, completed_at = ? WHERE id = ?`,
-      "Nenhum provider configurado",
-      nowIso(),
-      jobId
-    );
-    return fail("Nenhum provider de IA está configurado. Configure em Settings → AI Providers.", 503);
+    await dbRun(c.env.DB, "UPDATE generation_jobs SET status = 'FAILED', error = ?, completed_at = ? WHERE id = ?", "Nenhum provider configurado", nowIso(), jobId);
+    return fail("Nenhum provider de IA está configurado. Configure em Configurações → Provedores de IA.", 503);
   }
 
+  const dimensions = dimensionsForFormat(body.format ?? "1:1");
   try {
     const { result, attempts } = await generateWithFallback(orderedProviders, {
-      prompt,
-      negativePrompt,
+      prompt: finalPrompt,
+      negativePrompt: basePrompt.negativePrompt,
       quantity: body.quantity ?? 1,
+      width: dimensions.width,
+      height: dimensions.height,
+      referenceImages,
     });
 
     const assets = [];
     for (const image of result.images) {
       const assetId = newId();
-      const key = buildGeneratedKey(slug, jobId, assetId, "jpg");
+      const ext = image.contentType === "image/png" ? "png" : image.contentType === "image/webp" ? "webp" : "jpg";
+      const key = buildGeneratedKey(slug, jobId, assetId, ext);
       await uploadToR2(c.env.ASSETS_BUCKET, key, image.data, image.contentType);
-
       await dbRun(
         c.env.DB,
         `INSERT INTO generated_assets (
@@ -118,9 +160,9 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
         jobId,
         key,
         result.providerSlug,
-        image.width ?? null,
-        image.height ?? null,
-        "jpg",
+        image.width ?? dimensions.width,
+        image.height ?? dimensions.height,
+        ext,
         nowIso()
       );
       assets.push({ id: assetId, storage_key: key });
@@ -130,32 +172,27 @@ generationRoute.post("/:slug/generate", rateLimit({ namespace: "generate", limit
       c.env.DB,
       `UPDATE generation_jobs SET status = 'COMPLETED', provider_model_name = ?, settings = ?, attempted_providers = ?, completed_at = ? WHERE id = ?`,
       result.modelUsed ?? result.providerSlug,
-      JSON.stringify({ provider_slug: result.providerSlug }),
+      JSON.stringify({
+        provider_slug: result.providerSlug,
+        reference_images: referenceImages.length,
+        inspiration_id: body.inspiration_id ?? null,
+      }),
       JSON.stringify(attempts),
       nowIso(),
       jobId
     );
 
     await logActivity(c.env.DB, model.id, "GENERATION_COMPLETED", `Job ${jobId} concluído via ${result.providerSlug}`);
-
     const job = await dbFirst(c.env.DB, "SELECT * FROM generation_jobs WHERE id = ?", jobId);
     return created({ job, assets });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await dbRun(
-      c.env.DB,
-      `UPDATE generation_jobs SET status = 'FAILED', error = ?, completed_at = ? WHERE id = ?`,
-      message,
-      nowIso(),
-      jobId
-    );
+    await dbRun(c.env.DB, "UPDATE generation_jobs SET status = 'FAILED', error = ?, completed_at = ? WHERE id = ?", message, nowIso(), jobId);
     await logActivity(c.env.DB, model.id, "GENERATION_FAILED", message);
     return fail(`Falha na geração: ${message}`, 502);
   }
 });
 
-// POST /assets/:id/edit — edita uma imagem gerada usando um provider compatível
-// Body: { prompt, provider_slug? }. Cria um novo job/asset preservando o histórico.
 generationRoute.post(
   "/assets/:id/edit",
   rateLimit({ namespace: "edit", limit: 6, windowSeconds: 60 }),
@@ -214,7 +251,7 @@ generationRoute.post(
     if (!editResult) return fail("Nenhum provider conseguiu editar a imagem.", 502, attempts);
 
     const jobId = newId();
-    const now = nowIso();
+    const editNow = nowIso();
     await dbRun(
       c.env.DB,
       `INSERT INTO generation_jobs
@@ -226,8 +263,8 @@ generationRoute.post(
       body.prompt,
       JSON.stringify(attempts),
       JSON.stringify({ operation: "edit", source_asset_id: assetId, provider_slug: editResult.providerSlug }),
-      now,
-      now,
+      editNow,
+      editNow,
       editResult.modelUsed ?? editResult.providerSlug
     );
 
@@ -259,31 +296,22 @@ generationRoute.post(
   }
 );
 
-// GET /generation-jobs/:id — status de um job (para polling do frontend)
 generationRoute.get("/generation-jobs/:id", async (c) => {
   const id = c.req.param("id");
   const job = await dbFirst(c.env.DB, "SELECT * FROM generation_jobs WHERE id = ?", id);
   if (!job) return notFound("Job de geração");
-
   const assets = await dbAll(c.env.DB, "SELECT * FROM generated_assets WHERE generation_id = ?", id);
   return ok({ job, assets });
 });
 
-// GET /models/:slug/generation-jobs — histórico de gerações do modelo
 generationRoute.get("/:slug/generation-jobs", async (c) => {
   const slug = c.req.param("slug");
   const model = await dbFirst<{ id: string }>(c.env.DB, "SELECT id FROM models WHERE slug = ?", slug);
   if (!model) return notFound("Modelo");
-
-  const rows = await dbAll(
-    c.env.DB,
-    "SELECT * FROM generation_jobs WHERE model_id = ? ORDER BY created_at DESC LIMIT 50",
-    model.id
-  );
+  const rows = await dbAll(c.env.DB, "SELECT * FROM generation_jobs WHERE model_id = ? ORDER BY created_at DESC LIMIT 50", model.id);
   return ok(rows);
 });
 
-// POST /assets/:id/approve — aprova uma imagem gerada
 generationRoute.post("/assets/:id/approve", async (c) => {
   const id = c.req.param("id");
   await dbRun(c.env.DB, "UPDATE generated_assets SET approval_status = 'APPROVED' WHERE id = ?", id);
@@ -292,31 +320,13 @@ generationRoute.post("/assets/:id/approve", async (c) => {
   return ok(row);
 });
 
-// POST /assets/:id/reject — rejeita com motivo (usado no Learning from Approval)
 generationRoute.post("/assets/:id/reject", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json<{ reason?: string }>();
-
-  const asset = await dbFirst<{ id: string; generation_id: string }>(
-    c.env.DB,
-    "SELECT id, generation_id FROM generated_assets WHERE id = ?",
-    id
-  );
+  const asset = await dbFirst<{ id: string; generation_id: string }>(c.env.DB, "SELECT id, generation_id FROM generated_assets WHERE id = ?", id);
   if (!asset) return notFound("Asset");
-
-  await dbRun(
-    c.env.DB,
-    "UPDATE generated_assets SET approval_status = 'REJECTED', rejection_reason = ? WHERE id = ?",
-    body.reason ?? null,
-    id
-  );
-
-  const job = await dbFirst<{ model_id: string }>(
-    c.env.DB,
-    "SELECT model_id FROM generation_jobs WHERE id = ?",
-    asset.generation_id
-  );
-
+  await dbRun(c.env.DB, "UPDATE generated_assets SET approval_status = 'REJECTED', rejection_reason = ? WHERE id = ?", body.reason ?? null, id);
+  const job = await dbFirst<{ model_id: string }>(c.env.DB, "SELECT model_id FROM generation_jobs WHERE id = ?", asset.generation_id);
   if (job) {
     await dbRun(
       c.env.DB,
@@ -328,12 +338,10 @@ generationRoute.post("/assets/:id/reject", async (c) => {
       nowIso()
     );
   }
-
   const row = await dbFirst(c.env.DB, "SELECT * FROM generated_assets WHERE id = ?", id);
   return ok(row);
 });
 
-// POST /assets/:id/favorite — marca/desmarca como favorita
 generationRoute.post("/assets/:id/favorite", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json<{ favorite: boolean }>();
@@ -342,6 +350,13 @@ generationRoute.post("/assets/:id/favorite", async (c) => {
   if (!row) return notFound("Asset");
   return ok(row);
 });
+
+function dimensionsForFormat(format: GenerationFormat) {
+  if (format === "4:5") return { width: 1024, height: 1280 };
+  if (format === "9:16") return { width: 768, height: 1344 };
+  if (format === "landscape") return { width: 1280, height: 768 };
+  return { width: 1024, height: 1024 };
+}
 
 async function logActivity(db: D1Database, modelId: string, eventType: string, description: string) {
   await dbRun(

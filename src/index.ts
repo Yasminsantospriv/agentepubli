@@ -5,7 +5,7 @@ import { fail } from "./lib/response";
 import { requireAuth } from "./lib/auth";
 import { getSetting } from "./lib/app-settings";
 import { runAutomationRules } from "./services/automation-runner";
-import { runTrendScanner } from "./services/trend-scanner";
+import { runInstagramScanner } from "./services/instagram-inspiration";
 
 import { authRoute } from "./routes/auth";
 import { modelsRoute } from "./routes/models";
@@ -15,6 +15,7 @@ import { generationRoute } from "./routes/generation";
 import { socialRoute } from "./routes/social";
 import { libraryRoute } from "./routes/library";
 import { trendsRoute } from "./routes/trends";
+import { instagramRoute } from "./routes/instagram";
 import { automationsRoute } from "./routes/automations";
 import { settingsRoute } from "./routes/settings";
 import { assetsRoute } from "./routes/assets";
@@ -36,7 +37,7 @@ app.use("*", async (c, next) => {
     if (freeFirst !== null) c.env.FREE_FIRST_MODE = String(freeFirst);
     if (textModel) c.env.TEXT_AI_MODEL = textModel;
   } catch {
-    // Se o D1 estiver indisponível, mantém os valores definidos no Wrangler.
+    // Se o D1 estiver indisponível, mantém os valores do Wrangler.
   }
   await next();
 });
@@ -49,6 +50,7 @@ app.route("/models", referencesRoute);
 app.route("/models", generationRoute);
 app.route("/models", socialRoute);
 app.route("/", trendsRoute);
+app.route("/", instagramRoute);
 app.route("/providers", providersRoute);
 app.route("/", libraryRoute);
 app.route("/automations", automationsRoute);
@@ -69,8 +71,10 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
     ctx.waitUntil((async () => {
-      const trendResult = await runTrendScanner(env).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-      console.log("Trend scanner completed", trendResult);
+      const instagramResult = await runInstagramScanner(env).catch((error) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      console.log("Instagram inspiration scanner completed", instagramResult);
       const automationResult = await runAutomationRules(env);
       console.log("Automation cron completed", automationResult);
     })());

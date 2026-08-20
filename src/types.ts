@@ -11,9 +11,15 @@ export type Bindings = {
   ENVIRONMENT: string;
   FREE_FIRST_MODE: string;
   TEXT_AI_MODEL?: string;
+  IMAGE_AI_MODEL?: string;
   ALLOWED_ORIGIN?: string;
 
-  // Secrets (configurados via `wrangler secret put`)
+  // Meta / Instagram (Secrets no Cloudflare, nunca no GitHub)
+  META_ACCESS_TOKEN?: string;
+  META_IG_USER_ID?: string;
+  META_GRAPH_VERSION?: string;
+
+  // Secrets de providers opcionais
   OPENAI_API_KEY?: string;
   GOOGLE_API_KEY?: string;
   REPLICATE_API_TOKEN?: string;
@@ -29,8 +35,6 @@ export type AppEnv = {
     authUser?: { sub: string; role: "admin"; exp: number; iat: number };
   };
 };
-
-// --- Enums espelhando os CHECK constraints do schema.sql ---
 
 export type ReferenceType = "FACE" | "BODY" | "HAIR" | "MASTER" | "STYLE" | "TEMPORARY";
 export type IdentityLock = "OFF" | "NORMAL" | "STRONG" | "MAXIMUM";

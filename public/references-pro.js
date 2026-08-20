@@ -19,9 +19,45 @@
   const labels = { FACE:"Rosto", BODY:"Corpo", HAIR:"Cabelo", MASTER:"Referência geral", STYLE:"Estilo", TEMPORARY:"Temporária" };
   const masterLabel = (r) => r.is_master_face ? "ROSTO PRINCIPAL" : r.is_master_body ? "CORPO PRINCIPAL" : r.is_master_full ? "REFERÊNCIA GERAL" : "";
 
-  async function imageUrl(key) {
+  async function fetchReference(key) {
     const r = await fetch(`/assets/${encodeURI(key)}`, { headers: { Authorization: `Bearer ${token()}` } });
-    if (!r.ok) return ""; return URL.createObjectURL(await r.blob());
+    if (!r.ok) return null;
+    const blob = await r.blob();
+    return { blob, url: URL.createObjectURL(blob) };
+  }
+
+  async function resizeForAi(blob, maxSide = 448) {
+    const url = URL.createObjectURL(blob);
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = url;
+      });
+      const ratio = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+      const width = Math.max(1, Math.round(image.naturalWidth * ratio));
+      const height = Math.max(1, Math.round(image.naturalHeight * ratio));
+      const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+      return await new Promise((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error("Falha ao preparar referência")), "image/jpeg", 0.9));
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  async function prepareAiReady(refId, sourceBlob, card) {
+    const cacheKey = `yasmin-ai-ready-${refId}`;
+    const badgeRoot = card?.querySelector(".ref-info");
+    if (localStorage.getItem(cacheKey) === "1") {
+      if (badgeRoot && !badgeRoot.querySelector("[data-ai-ready]")) badgeRoot.insertAdjacentHTML("afterbegin", `<span class="badge success" data-ai-ready>IA PRONTA</span>`);
+      return;
+    }
+    try {
+      const resized = await resizeForAi(sourceBlob, 448);
+      const form = new FormData();
+      form.set("file", new File([resized], "reference-ai.jpg", { type: "image/jpeg" }));
+      await api(`/models/references/${encodeURIComponent(refId)}/ai-ready`, { method: "POST", body: form });
+      localStorage.setItem(cacheKey, "1");
+      if (badgeRoot && !badgeRoot.querySelector("[data-ai-ready]")) badgeRoot.insertAdjacentHTML("afterbegin", `<span class="badge success" data-ai-ready>IA PRONTA</span>`);
+    } catch {
+      if (badgeRoot && !badgeRoot.querySelector("[data-ai-ready]")) badgeRoot.insertAdjacentHTML("afterbegin", `<span class="badge warning" data-ai-ready>PREPARAR IA</span>`);
+    }
   }
 
   async function enhance() {
@@ -41,7 +77,7 @@
     panel.className = "card";
     panel.style.marginBottom = "16px";
     panel.innerHTML = `
-      <div class="card-head"><div><h3>Vault de identidade visual</h3><p class="muted small">Envie uma ou várias imagens, classifique e escolha as referências principais da Yasmin.</p></div><span class="badge purple">${refs.filter(r=>r.active).length} ativas</span></div>
+      <div class="card-head"><div><h3>Vault de identidade visual</h3><p class="muted small">As imagens são reduzidas automaticamente no seu navegador para uma cópia AI-ready e mantidas privadas no R2.</p></div><span class="badge purple">${refs.filter(r=>r.active).length} ativas</span></div>
       <form id="referenceProForm" class="stack gap-md">
         <label class="field"><span>Imagens</span><input id="refProFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple required /><small class="muted">Você pode selecionar várias imagens de uma vez.</small></label>
         <div class="grid grid-3">
@@ -61,9 +97,15 @@
       const btn = panel.querySelector("#refProSubmit"); btn.disabled = true; btn.textContent = `Enviando 0/${files.length}…`;
       try {
         for (let i=0;i<files.length;i++) {
-          const f = new FormData(); f.set("file", files[i]); f.set("reference_type", panel.querySelector("#refProType").value); f.set("priority", panel.querySelector("#refProPriority").value); f.set("weight", panel.querySelector("#refProWeight").value); f.set("description", panel.querySelector("#refProDescription").value || files[i].name);
+          const f = new FormData();
+          f.set("file", files[i]);
+          f.set("reference_type", panel.querySelector("#refProType").value);
+          f.set("priority", panel.querySelector("#refProPriority").value);
+          f.set("weight", panel.querySelector("#refProWeight").value);
+          f.set("description", panel.querySelector("#refProDescription").value || files[i].name);
           if (files.length === 1) f.set("master_kind", panel.querySelector("#refProMaster").value);
-          await api(`/models/${MODEL}/references`, { method:"POST", body:f }); btn.textContent = `Enviando ${i+1}/${files.length}…`;
+          await api(`/models/${MODEL}/references`, { method:"POST", body:f });
+          btn.textContent = `Enviando ${i+1}/${files.length}…`;
         }
         toast("Referências enviadas para o R2."); location.reload();
       } catch(err) { toast(err.message, "error"); btn.disabled=false; btn.textContent="Enviar referência(s)"; }
@@ -77,11 +119,13 @@
 
     for (const r of refs) {
       const c = gallery.querySelector(`[data-pro-ref="${CSS.escape(r.id)}"]`); if (!c) continue;
-      const u = await imageUrl(r.storage_key).catch(()=>""); c.querySelector(".asset-media").innerHTML = u ? `<img src="${u}" alt="${labels[r.reference_type] || "Referência"}" />` : `<div class="image-placeholder">Imagem indisponível</div>`;
+      const fetched = await fetchReference(r.storage_key).catch(()=>null);
+      c.querySelector(".asset-media").innerHTML = fetched ? `<img src="${fetched.url}" alt="${labels[r.reference_type] || "Referência"}" />` : `<div class="image-placeholder">Imagem indisponível</div>`;
+      if (fetched?.blob && r.active) prepareAiReady(r.id, fetched.blob, c);
       c.querySelector("[data-master-face]").onclick = async()=>{ await api(`/models/references/${r.id}`,{method:"PATCH",body:JSON.stringify({is_master_face:1,is_master_body:0,is_master_full:0})}); toast("Rosto principal atualizado."); location.reload(); };
       c.querySelector("[data-master-body]").onclick = async()=>{ await api(`/models/references/${r.id}`,{method:"PATCH",body:JSON.stringify({is_master_body:1,is_master_face:0,is_master_full:0})}); toast("Corpo principal atualizado."); location.reload(); };
       c.querySelector("[data-toggle]").onclick = async()=>{ await api(`/models/references/${r.id}`,{method:"PATCH",body:JSON.stringify({active:r.active?0:1})}); location.reload(); };
-      c.querySelector("[data-delete]").onclick = async()=>{ if(!confirm("Excluir esta referência permanentemente?"))return; await api(`/models/references/${r.id}`,{method:"DELETE"}); toast("Referência excluída."); location.reload(); };
+      c.querySelector("[data-delete]").onclick = async()=>{ if(!confirm("Excluir esta referência permanentemente?"))return; await api(`/models/references/${r.id}`,{method:"DELETE"}); localStorage.removeItem(`yasmin-ai-ready-${r.id}`); toast("Referência excluída."); location.reload(); };
     }
   }
 
